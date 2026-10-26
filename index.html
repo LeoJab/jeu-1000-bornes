@@ -316,7 +316,15 @@ const limited=p=>p.limit&&!hasB(p,'BP');
 
 function buildDeck(){const d=[];for(const c in COUNTS)for(let i=0;i<COUNTS[c];i++)d.push(c);for(let i=d.length-1;i>0;i--){const j=rnd(i+1);[d[i],d[j]]=[d[j],d[i]]}return d}
 function log(s,t,k){s.log.push({t,k:k||''});if(s.log.length>30)s.log.shift()}
-function draw(s,i){if(s.deck.length){s.seats[i].hand.push(s.deck.pop());return true}return false}
+const MAX_RESHUF=40;
+function refill(s){
+  const pool=s.discard.concat(s.used||[]);
+  if(s.deck.length||!pool.length||(s.reshuf||0)>=MAX_RESHUF)return false;
+  const d=pool;s.used=[];for(let i=d.length-1;i>0;i--){const j=rnd(i+1);[d[i],d[j]]=[d[j],d[i]]}
+  s.deck=d;s.discard=[];s.reshuf=(s.reshuf||0)+1;
+  log(s,`🔄 Pioche vide : la défausse est remélangée (${d.length} cartes)`,'big');s.fx.push({e:'shuffle',n:d.length});return true;
+}
+function draw(s,i){if(!s.deck.length)refill(s);if(s.deck.length){s.seats[i].hand.push(s.deck.pop());return true}return false}
 
 function canSelf(s,i,c){
   const p=s.seats[i],d=DEF[c];
@@ -340,14 +348,15 @@ function targets(s,i,c){
 }
 function playable(s,i,c){return DEF[c].k==='atk'?targets(s,i,c).length>0:canSelf(s,i,c)}
 function applyBotte(s,p,b){
-  if(b==='BP'){p.limit=false;if(p.battle==='FR')p.battle=null}
-  else{const hz={BC:'PE',BI:'CR',BA:'AC'}[b];if(p.battle===hz)p.battle=DEF[hz].par}
+  const dis=s.discard||[];
+  if(b==='BP'){if(p.limit){p.limit=false;dis.push('LV')}if(p.battle==='FR'){dis.push('FR');p.battle=null}}
+  else{const hz={BC:'PE',BI:'CR',BA:'AC'}[b];if(p.battle===hz){dis.push(hz);p.battle=null}}
 }
 function advanceTurn(s,idx){
   const n=s.seats.length;
   for(let k=0;k<n;k++){
     const j=(idx+k)%n;
-    if(s.deck.length){draw(s,j);s.turn=j;return}
+    if(draw(s,j)){s.turn=j;return}
     if(s.seats[j].hand.length){s.turn=j;return}
   }
   log(s,'🂠 Plus aucune carte : fin de la manche !','big');
@@ -374,7 +383,7 @@ function doAction(s,i,a){
       s.fx.push({e:'cf',p:t,by:i,a:c,c:b,all4:T.bottes.length===4});
       advanceTurn(s,t);
     }else{
-      if(c==='LV')T.limit=true;else T.battle=c;
+      if(c==='LV')T.limit=true;else{if(T.battle)s.discard.push(T.battle);T.battle=c}
       log(s,`${p.name} → ${d.n} sur ${T.name}`,'atk');
       s.fx.push({e:'atk',p:i,t,c});
       advanceTurn(s,(i+1)%n);
@@ -384,7 +393,7 @@ function doAction(s,i,a){
   if(!canSelf(s,i,c))return false;
   p.hand.splice(a.idx,1);
   if(d.k==='km'){
-    const before=p.km;p.km+=d.v;if(d.v===200)p.n200++;
+    const before=p.km;p.km+=d.v;(s.used=s.used||[]).push(c);if(d.v===200)p.n200++;
     log(s,`${p.name} roule ${d.v} km (${p.km} km)`,'km');
     s.fx.push({e:'km',p:i,c,v:d.v,from:before,km:p.km});
     if(p.km===1000){
@@ -394,7 +403,7 @@ function doAction(s,i,a){
       endRound(s,i);
     }else advanceTurn(s,(i+1)%n);
   }else if(d.k==='par'){
-    if(c==='FL')p.limit=false;else p.battle=c;
+    if(c==='FL'){p.limit=false;s.discard.push('LV','FL')}else{if(p.battle)s.discard.push(p.battle);p.battle=c}
     log(s,`${p.name} pose ${d.n}`,'par');s.fx.push({e:'par',p:i,c});
     advanceTurn(s,(i+1)%n);
   }else{
@@ -422,7 +431,7 @@ function endRound(s,wi){
   else s.phase='roundEnd';
 }
 function newRound(s){
-  s.round++;s.deck=buildDeck();s.discard=[];s.delayed=false;s.roundRes=null;s.roundWinner=-1;
+  s.round++;s.deck=buildDeck();s.discard=[];s.used=[];s.reshuf=0;s.delayed=false;s.roundRes=null;s.roundWinner=-1;
   s.seats.forEach(p=>Object.assign(p,{hand:[],battle:null,limit:false,km:0,n200:0,bottes:[]}));
   for(let r=0;r<6;r++)s.seats.forEach((p,j)=>draw(s,j));
   s.phase='play';
@@ -456,7 +465,7 @@ function botChoose(s,i){
   const p=s.seats[i],H=p.hand;
   const P=k=>({type:'play',idx:k});
   for(let k=0;k<H.length;k++)if(DEF[H[k]].k==='bot'&&botteHelps(p,H[k]))return P(k);
-  if(s.deck.length<8){const k=H.findIndex(c=>DEF[c].k==='bot');if(k>=0)return P(k)}
+  if(s.deck.length<8&&(s.reshuf||0)>=MAX_RESHUF){const k=H.findIndex(c=>DEF[c].k==='bot');if(k>=0)return P(k)}
   if(!rolling(p)){const k=H.findIndex(c=>DEF[c].k==='par'&&c!=='FL'&&canSelf(s,i,c));if(k>=0)return P(k)}
   let best=null;
   const lead=Math.max(...s.seats.map((q,j)=>j===i?-1:q.km));
@@ -785,6 +794,7 @@ function fx1(f){
   const s=S,mi=myIdx();
   const nm=j=>s.seats[j]?esc(s.seats[j].name):'?';
   switch(f.e){
+    case 'shuffle':{const dp=$('#deckPile');banner('🔄 REMÉLANGE !',`Défausse + bornes jouées repartent dans la pioche (${f.n} cartes)`,'small',1400);if(dp){shake(dp,6,500);const pt=center(dp);burst(pt.x,pt.y,{n:30,cols:['#2433f2','#ffd426','#fff'],sp:6,g:.08})}SFX.whoosh();setTimeout(SFX.whoosh,150);break}
     case 'round':banner(`MANCHE ${s.round}`,'🚦 Tout le monde au feu rouge…','',1400);SFX.honk();break;
     case 'disc':{flyCard(f.c,fromPt(f.p),center($('#discPile')),500);SFX.whoosh();break}
     case 'km':{
@@ -905,19 +915,12 @@ const REACTS=['😂','😱','🔥','😈','👏','🐌','💀','🤡','😭','�
 function showReact(id,e){
   if(!REACTS.includes(e))return;
   let el=null,name='';if(S&&S.seats){const j=S.seats.findIndex(p=>p.id===id);if(j>=0){el=j===myIdx()?$('#hand'):seatEl(j);name=S.seats[j].name}}
-  const o=center(el),W=innerWidth,H=innerHeight;
-  // 1) gros emoji géant au centre
-  const big=document.createElement('div');big.className='react';big.textContent=e;big.style.left=W/2+'px';big.style.top=H/2+'px';big.style.fontSize=Math.min(W,H)*.45+'px';big.style.zIndex=58;document.body.appendChild(big);
-  big.animate([{transform:'translate(-50%,-50%) scale(.1) rotate(-30deg)',opacity:0},{transform:'translate(-50%,-50%) scale(1.15) rotate(8deg)',opacity:.95,offset:.25},{transform:'translate(-50%,-50%) scale(1) rotate(-4deg)',opacity:.9,offset:.6},{transform:'translate(-50%,-50%) scale(1.6) rotate(0)',opacity:0}],{duration:1500,easing:'cubic-bezier(.2,1.3,.4,1)'}).onfinish=()=>big.remove();
-  // 2) étiquette avec le pseudo
-  if(name){const t=document.createElement('div');t.className='floattxt';t.style.fontSize='22px';t.style.color='#fff';t.textContent=name+' '+e;t.style.left=W/2+'px';t.style.top=(H/2+Math.min(W,H)*.27)+'px';document.body.appendChild(t);
-    t.animate([{transform:'translate(-50%,-50%) scale(.5)',opacity:0},{transform:'translate(-50%,-50%) scale(1)',opacity:1,offset:.2},{transform:'translate(-50%,-50%) scale(1)',opacity:1,offset:.8},{opacity:0,transform:'translate(-50%,-80%)'}],{duration:1600}).onfinish=()=>t.remove();}
-  // 3) explosion d'emojis depuis le joueur qui couvre tout l'écran
-  for(let i=0;i<34;i++){const a=Math.random()*Math.PI*2,sp=6+Math.random()*12;
-    addP({x:o.x,y:o.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-4,g:.18,dr:.985,r:(Math.random()-.5),vr:(Math.random()-.5)*.15,life:110+rnd(60),fade:30,s:26+rnd(30),sh:'txt',t:e})}
-  // 4) pluie sur toute la largeur
-  emojiRain(e,26);
-  shake($('#game'),4,350);SFX.pop();vibrate(30);
+  // petite pluie légère sur tout l'écran
+  for(let i=0;i<12;i++)addP({x:Math.random()*innerWidth,y:-30-Math.random()*innerHeight*.5,vx:(Math.random()-.5)*1.2,vy:2+Math.random()*2,g:.04,dr:.995,r:(Math.random()-.5)*.4,vr:(Math.random()-.5)*.04,life:230,fade:50,s:26+rnd(14),sh:'txt',t:e});
+  // l'emoji au-dessus du joueur qui l'envoie
+  const o=center(el),d=document.createElement('div');d.className='react';d.textContent=e;d.style.left=o.x+'px';d.style.top=o.y+'px';document.body.appendChild(d);
+  d.animate([{transform:'translate(-50%,-50%) scale(.3)',opacity:0},{transform:'translate(-50%,-80%) scale(1.3)',opacity:1,offset:.2},{transform:'translate(-50%,-220%) scale(1)',opacity:0}],{duration:1500,easing:'ease-out'}).onfinish=()=>d.remove();
+  SFX.pop();
 }
 let reactAt=0;
 function renderLobby(){
@@ -997,6 +1000,7 @@ function showRules(){
   <h3>🚦 Rouler</h3>
   ${rl(['FV'],'<b>Feu vert</b> : obligatoire pour démarrer, et pour repartir après un feu rouge ou une réparation.')}
   ${rl(['25','100','200'],'<b>Bornes</b> : 25, 50, 75, 100 ou 200 km. Deux cartes 200 maximum par manche, et on ne dépasse jamais 1000.')}
+  <p>🔄 <b>Pioche vide ?</b> La défausse et les bornes déjà posées sont remélangées automatiquement (tes km restent acquis) : la manche ne s’arrête que quand quelqu’un atteint les <b>1000 km</b>.</p>
   <h3>💥 Attaques</h3>
   ${rl(['FR','PE','CR','AC'],'<b>Feu rouge, panne d’essence, crevaison, accident</b> : à poser sur un adversaire qui roule pour le bloquer.')}
   ${rl(['LV'],'<b>Limitation de vitesse</b> : l’adversaire ne peut plus poser que des 25 ou 50 km.')}
@@ -1010,7 +1014,7 @@ function showRules(){
   ${rl(['BI'],'<b>Increvable</b> : immunisé contre les <b>crevaisons</b>.')}
   ${rl(['BA'],'<b>As du volant</b> : immunisé contre les <b>accidents</b>.')}
   <p>⚡ <b>Coup fourré</b> : si on t’attaque et que tu as en main la botte qui contre cette attaque, elle se déclenche <b>automatiquement</b> : l’attaque est annulée, tu gagnes +400 pts (100 + 300) et c’est à toi de jouer !</p>
-  <h3>🏆 Points de la manche</h3><ul><li>1 point par km parcouru</li><li>Botte +100 · Coup fourré +300 · Les 4 bottes +300</li><li>Voyage terminé (1000 km) +400</li><li>Sans carte 200 +300 · Arrivée après que la pioche est vide +300</li><li>Capot (tous les adversaires à 0 km) +500</li></ul>
+  <h3>🏆 Points de la manche</h3><ul><li>1 point par km parcouru</li><li>Botte +100 · Coup fourré +300 · Les 4 bottes +300</li><li>Voyage terminé (1000 km) +400</li><li>Sans carte 200 +300</li><li>Capot (tous les adversaires à 0 km) +500</li></ul>
   <div style="text-align:center;margin-top:10px"><button class="btn" data-act="closerules">C’est parti !</button></div></div>`;
   $('#rulem').classList.add('on');
 }
