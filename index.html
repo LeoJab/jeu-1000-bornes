@@ -113,7 +113,7 @@ small,.muted{color:#5b5980;font-weight:700}
 .hintb{background:rgba(18,16,43,.55);border-radius:12px;padding:6px 12px;font-size:14px}
 .myturn{color:var(--yel);font-family:'Bowlby One';font-size:15px;animation:pulse 1s ease-in-out infinite}
 @keyframes pulse{50%{transform:scale(1.07)}}
-.reacts{display:flex;gap:4px}
+.reacts{display:flex;gap:4px;flex-wrap:wrap;justify-content:center;max-width:100%}
 .reacts button{background:rgba(255,255,255,.15);border:2px solid rgba(255,255,255,.35);border-radius:10px;font-size:18px;width:36px;height:34px;cursor:pointer}
 .reacts button:active{transform:scale(.9)}
 #hand{padding:8px 8px calc(10px + env(safe-area-inset-bottom));display:flex;justify-content:center;gap:6px;background:rgba(18,16,43,.4);border-top:3px solid var(--ink);flex:none;min-height:calc(min((100vw - 60px)/7,96px)*1.42 + 24px)}
@@ -200,7 +200,7 @@ small,.muted{color:#5b5980;font-weight:700}
 .trophy{font-size:72px;text-align:center;animation:wob 1.4s ease-in-out infinite}
 .rules{font-size:14px;line-height:1.4;font-weight:700}
 .rules p{margin:6px 0}
-.rules ul{margin:4px 0 4px 18px}
+.rules ul{margin:4px 0 4px 18px}.rules li{margin:5px 0}.rl{display:flex;gap:10px;align-items:center;margin:7px 0}.rlc{display:flex;gap:3px;flex:none}.rules h3{margin:12px 0 4px}
 .rules .mini{display:inline-flex;vertical-align:middle;margin:0 2px}
 .rules .mini .card{--cw:34px}
 #logd{position:fixed;top:0;right:0;bottom:0;width:min(340px,88vw);background:#fff;border-left:3px solid var(--ink);z-index:52;transform:translateX(105%);transition:transform .25s;display:flex;flex-direction:column;box-shadow:-5px 0 0 rgba(18,16,43,.35)}
@@ -685,7 +685,7 @@ function hint(p){
 }
 function actHTML(s,mi,selC,tg){
   if(s.phase!=='play')return '';
-  const reacts=MODE==='online'?`<div class="reacts">${['😂','😱','🔥','😈','👏','🐌'].map(e=>`<button data-act="react" data-e="${e}">${e}</button>`).join('')}</div>`:'';
+  const reacts=MODE==='online'?`<div class="reacts">${REACTS.map(e=>`<button data-act="react" data-e="${e}">${e}</button>`).join('')}</div>`:'';
   if(mi<0||s.turn!==mi){
     const cp=s.seats[s.turn];
     const away=MODE==='online'&&!cp.bot&&!present(cp.id);
@@ -901,13 +901,25 @@ function joinRoom(code,create){
   });
   salle.on('error',msg=>{toast('😬 '+esc(msg||'Problème avec la salle'),3500);if(!S)goHome()});
 }
+const REACTS=['😂','😱','🔥','😈','👏','🐌','💀','🤡','😭','🚀','💩','🍿'];
 function showReact(id,e){
-  if(!['😂','😱','🔥','😈','👏','🐌'].includes(e))return;
-  let el=null;if(S&&S.seats){const j=S.seats.findIndex(p=>p.id===id);if(j>=0)el=j===myIdx()?$('#hand'):seatEl(j)}
-  const pt=center(el);const d=document.createElement('div');d.className='react';d.textContent=e;d.style.left=pt.x+'px';d.style.top=pt.y+'px';document.body.appendChild(d);
-  d.animate([{transform:'translate(-50%,-50%) scale(.3)',opacity:0},{transform:'translate(-50%,-80%) scale(1.4)',opacity:1,offset:.2},{transform:`translate(${-50+(Math.random()-.5)*60}%,-260%) scale(1)`,opacity:0}],{duration:1600,easing:'ease-out'}).onfinish=()=>d.remove();
-  SFX.pop();
+  if(!REACTS.includes(e))return;
+  let el=null,name='';if(S&&S.seats){const j=S.seats.findIndex(p=>p.id===id);if(j>=0){el=j===myIdx()?$('#hand'):seatEl(j);name=S.seats[j].name}}
+  const o=center(el),W=innerWidth,H=innerHeight;
+  // 1) gros emoji géant au centre
+  const big=document.createElement('div');big.className='react';big.textContent=e;big.style.left=W/2+'px';big.style.top=H/2+'px';big.style.fontSize=Math.min(W,H)*.45+'px';big.style.zIndex=58;document.body.appendChild(big);
+  big.animate([{transform:'translate(-50%,-50%) scale(.1) rotate(-30deg)',opacity:0},{transform:'translate(-50%,-50%) scale(1.15) rotate(8deg)',opacity:.95,offset:.25},{transform:'translate(-50%,-50%) scale(1) rotate(-4deg)',opacity:.9,offset:.6},{transform:'translate(-50%,-50%) scale(1.6) rotate(0)',opacity:0}],{duration:1500,easing:'cubic-bezier(.2,1.3,.4,1)'}).onfinish=()=>big.remove();
+  // 2) étiquette avec le pseudo
+  if(name){const t=document.createElement('div');t.className='floattxt';t.style.fontSize='22px';t.style.color='#fff';t.textContent=name+' '+e;t.style.left=W/2+'px';t.style.top=(H/2+Math.min(W,H)*.27)+'px';document.body.appendChild(t);
+    t.animate([{transform:'translate(-50%,-50%) scale(.5)',opacity:0},{transform:'translate(-50%,-50%) scale(1)',opacity:1,offset:.2},{transform:'translate(-50%,-50%) scale(1)',opacity:1,offset:.8},{opacity:0,transform:'translate(-50%,-80%)'}],{duration:1600}).onfinish=()=>t.remove();}
+  // 3) explosion d'emojis depuis le joueur qui couvre tout l'écran
+  for(let i=0;i<34;i++){const a=Math.random()*Math.PI*2,sp=6+Math.random()*12;
+    addP({x:o.x,y:o.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-4,g:.18,dr:.985,r:(Math.random()-.5),vr:(Math.random()-.5)*.15,life:110+rnd(60),fade:30,s:26+rnd(30),sh:'txt',t:e})}
+  // 4) pluie sur toute la largeur
+  emojiRain(e,26);
+  shake($('#game'),4,350);SFX.pop();vibrate(30);
 }
+let reactAt=0;
 function renderLobby(){
   const el=$('#lobbyIn');
   if(!S){el.innerHTML=`<div class="logo"><span class="l2">SALON</span></div><div class="panel" style="text-align:center"><div class="code">${esc(ON.code||'')}</div><p class="muted">🔌 Connexion à la salle…</p><button class="btn w sm" data-act="home" style="margin-top:10px">⬅ Retour</button></div>`;return}
@@ -977,17 +989,28 @@ function renderHome(){
 }
 
 /* ============ RÈGLES ============ */
-function mini(c){return `<span class="mini">${cardHTML(c,'sm')}</span>`}
+function mini(c){return cardHTML(c,'sm').replace('class="card','style="--cw:40px" class="card')}
+function rl(cards,txt){return `<div class="rl"><div class="rlc">${cards.map(mini).join('')}</div><div>${txt}</div></div>`}
 function showRules(){
   $('#rulem').innerHTML=`<div class="mbox panel rules" data-act="noop"><h2>📖 Les règles</h2>
-  <p><b>But :</b> être le premier à parcourir <b>exactement 1000 km</b>. Chaque tour : tu <b>pioches</b> (automatique) puis tu <b>joues</b> ou <b>défausses</b> une carte.</p>
-  <p>${mini('FV')} <b>Feu vert</b> obligatoire pour démarrer, et après chaque réparation ou feu rouge.</p>
-  <p>${mini('100')} <b>Bornes</b> : 25, 50, 75, 100, 200 km. Deux cartes 200 max par manche. On ne dépasse jamais 1000.</p>
-  <p>${mini('AC')} <b>Attaques</b> (sur un adversaire qui roule) : feu rouge, panne, crevaison, accident. ${mini('LV')} La <b>limitation</b> bloque à 50 km max.</p>
-  <p>${mini('RE')} <b>Parades</b> : essence, roue de secours, réparations, fin de limitation… puis un feu vert pour repartir.</p>
-  <p>${mini('BP')} <b>Bottes</b> : protection à vie (+100 pts), et tu <b>rejoues</b>. Le Véhicule prioritaire te fait rouler sans feu vert !</p>
-  <p>⚡ <b>Coup fourré</b> : si on t’attaque et que tu as la botte qui contre en main, elle se déclenche <b>automatiquement</b> : attaque annulée, +400 pts et c’est à toi de jouer !</p>
-  <p><b>Points de la manche :</b></p><ul><li>1 point par km parcouru</li><li>Botte +100 · Coup fourré +300 · 4 bottes +300</li><li>Voyage terminé (1000 km) +400</li><li>Sans carte 200 +300 · Pioche vide avant l’arrivée +300</li><li>Capot (adversaires à 0 km) +500</li></ul>
+  <p><b>But :</b> être le premier à parcourir <b>exactement 1000 km</b>. À chaque tour, tu <b>pioches</b> (c’est automatique) puis tu <b>joues</b> ou <b>défausses</b> une carte.</p>
+  <h3>🚦 Rouler</h3>
+  ${rl(['FV'],'<b>Feu vert</b> : obligatoire pour démarrer, et pour repartir après un feu rouge ou une réparation.')}
+  ${rl(['25','100','200'],'<b>Bornes</b> : 25, 50, 75, 100 ou 200 km. Deux cartes 200 maximum par manche, et on ne dépasse jamais 1000.')}
+  <h3>💥 Attaques</h3>
+  ${rl(['FR','PE','CR','AC'],'<b>Feu rouge, panne d’essence, crevaison, accident</b> : à poser sur un adversaire qui roule pour le bloquer.')}
+  ${rl(['LV'],'<b>Limitation de vitesse</b> : l’adversaire ne peut plus poser que des 25 ou 50 km.')}
+  <h3>🔧 Parades</h3>
+  ${rl(['ES','RS','RE'],'<b>Essence, roue de secours, réparations</b> : chacune répare son attaque. Ensuite, il faut un feu vert pour repartir.')}
+  ${rl(['FL'],'<b>Fin de limitation</b> : annule la limitation de vitesse.')}
+  <h3>✨ Les 4 bottes</h3>
+  <p>Une seule de chaque dans le jeu. Une botte te protège <b>à vie</b> pour toute la manche, rapporte <b>+100 pts</b> et te fait <b>rejouer</b> aussitôt. Si tu es bloqué par ce qu’elle contre, elle te répare aussi.</p>
+  ${rl(['BP'],'<b>Véhicule prioritaire</b> : immunisé contre les <b>feux rouges</b> et les <b>limitations de vitesse</b>. Tu roules <b>sans feu vert</b> !')}
+  ${rl(['BC'],'<b>Citerne d’essence</b> : immunisé contre les <b>pannes d’essence</b>.')}
+  ${rl(['BI'],'<b>Increvable</b> : immunisé contre les <b>crevaisons</b>.')}
+  ${rl(['BA'],'<b>As du volant</b> : immunisé contre les <b>accidents</b>.')}
+  <p>⚡ <b>Coup fourré</b> : si on t’attaque et que tu as en main la botte qui contre cette attaque, elle se déclenche <b>automatiquement</b> : l’attaque est annulée, tu gagnes +400 pts (100 + 300) et c’est à toi de jouer !</p>
+  <h3>🏆 Points de la manche</h3><ul><li>1 point par km parcouru</li><li>Botte +100 · Coup fourré +300 · Les 4 bottes +300</li><li>Voyage terminé (1000 km) +400</li><li>Sans carte 200 +300 · Arrivée après que la pioche est vide +300</li><li>Capot (tous les adversaires à 0 km) +500</li></ul>
   <div style="text-align:center;margin-top:10px"><button class="btn" data-act="closerules">C’est parti !</button></div></div>`;
   $('#rulem').classList.add('on');
 }
@@ -1011,7 +1034,7 @@ document.addEventListener('click',e=>{
     case 'closerules':if(e.target===el||el.tagName==='BUTTON')$('#rulem').classList.remove('on');break;
     case 'quit':if(MODE==='online'&&S&&S.phase==='play'&&myIdx()>=0&&!confirmQuit())break;goHome();break;
     case 'home':goHome();break;
-    case 'react':if(ON.salle){try{ON.salle.send({t:'react',e:el.dataset.e})}catch(_){}}break;
+    case 'react':if(ON.salle){if(Date.now()-reactAt<1200){toast('Doucement le spam 😅',900);break}reactAt=Date.now();try{ON.salle.send({t:'react',e:el.dataset.e})}catch(_){}}break;
     case 'create':joinRoom(genCode(),true);break;
     case 'join':{const v=($('#code')||{}).value||'';joinRoom(v,false);break}
     case 'h-bots':HOME.bots=+el.dataset.v;LS.set('mb_bots',HOME.bots);renderHome();break;
