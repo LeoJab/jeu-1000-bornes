@@ -311,7 +311,9 @@ const COLORS=['#e8467c','#f28c28','#1fbf5b','#7a4dff','#00a3c4','#d4a20a','#e84a
 /* ============ MOTEUR ============ */
 const hasB=(p,b)=>p.bottes.some(x=>x.c===b);
 const isHaz=c=>HAZ.includes(c);
-const rolling=p=>hasB(p,'BP')?!isHaz(p.battle):p.battle==='FV';
+const rolling=p=>hasB(p,'BP')?!isHaz(p.battle):(p.battle==='FV'||p.battle==='GO');
+const DIST=s=>(s&&s.dist)||1000;
+const real=c=>c&&c!=='GO';
 const limited=p=>p.limit&&!hasB(p,'BP');
 
 function buildDeck(){const d=[];for(const c in COUNTS)for(let i=0;i<COUNTS[c];i++)d.push(c);for(let i=d.length-1;i>0;i--){const j=rnd(i+1);[d[i],d[j]]=[d[j],d[i]]}return d}
@@ -328,9 +330,9 @@ function draw(s,i){if(!s.deck.length)refill(s);if(s.deck.length){s.seats[i].hand
 
 function canSelf(s,i,c){
   const p=s.seats[i],d=DEF[c];
-  if(d.k==='km')return rolling(p)&&p.km+d.v<=1000&&!(d.v===200&&p.n200>=2)&&!(limited(p)&&d.v>50);
+  if(d.k==='km')return rolling(p)&&p.km+d.v<=DIST(s)&&!(d.v===200&&p.n200>=2)&&!(limited(p)&&d.v>50);
   if(d.k==='par'){
-    if(c==='FV')return !hasB(p,'BP')&&p.battle!=='FV'&&!(isHaz(p.battle)&&p.battle!=='FR');
+    if(c==='FV')return !hasB(p,'BP')&&!rolling(p)&&!(isHaz(p.battle)&&p.battle!=='FR');
     if(c==='FL')return limited(p);
     return p.battle===d.vs;
   }
@@ -350,7 +352,7 @@ function playable(s,i,c){return DEF[c].k==='atk'?targets(s,i,c).length>0:canSelf
 function applyBotte(s,p,b){
   const dis=s.discard||[];
   if(b==='BP'){if(p.limit){p.limit=false;dis.push('LV')}if(p.battle==='FR'){dis.push('FR');p.battle=null}}
-  else{const hz={BC:'PE',BI:'CR',BA:'AC'}[b];if(p.battle===hz){dis.push(hz);p.battle=null}}
+  else{const hz={BC:'PE',BI:'CR',BA:'AC'}[b];if(p.battle===hz){dis.push(hz);p.battle=s.fast?'GO':null}}
 }
 function advanceTurn(s,idx){
   const n=s.seats.length;
@@ -383,7 +385,7 @@ function doAction(s,i,a){
       s.fx.push({e:'cf',p:t,by:i,a:c,c:b,all4:T.bottes.length===4});
       advanceTurn(s,t);
     }else{
-      if(c==='LV')T.limit=true;else{if(T.battle)s.discard.push(T.battle);T.battle=c}
+      if(c==='LV')T.limit=true;else{if(real(T.battle))s.discard.push(T.battle);T.battle=c}
       log(s,`${p.name} → ${d.n} sur ${T.name}`,'atk');
       s.fx.push({e:'atk',p:i,t,c});
       advanceTurn(s,(i+1)%n);
@@ -396,14 +398,16 @@ function doAction(s,i,a){
     const before=p.km;p.km+=d.v;(s.used=s.used||[]).push(c);if(d.v===200)p.n200++;
     log(s,`${p.name} roule ${d.v} km (${p.km} km)`,'km');
     s.fx.push({e:'km',p:i,c,v:d.v,from:before,km:p.km});
-    if(p.km===1000){
+    if(p.km===DIST(s)){
       s.delayed=s.deck.length===0;
-      log(s,`🏁 ${p.name} atteint les 1000 BORNES !`,'big');
+      log(s,`🏁 ${p.name} atteint les ${DIST(s)} BORNES !`,'big');
       s.fx.push({e:'win1000',p:i});
       endRound(s,i);
     }else advanceTurn(s,(i+1)%n);
   }else if(d.k==='par'){
-    if(c==='FL'){p.limit=false;s.discard.push('LV','FL')}else{if(p.battle)s.discard.push(p.battle);p.battle=c}
+    if(c==='FL'){p.limit=false;s.discard.push('LV','FL')}
+    else{if(real(p.battle))s.discard.push(p.battle);
+      if(s.fast&&c!=='FV'){s.discard.push(c);p.battle='GO'}else p.battle=c}
     log(s,`${p.name} pose ${d.n}`,'par');s.fx.push({e:'par',p:i,c});
     advanceTurn(s,(i+1)%n);
   }else{
@@ -418,7 +422,7 @@ function endRound(s,wi){
   const res=s.seats.map((p,j)=>{
     const nb=p.bottes.length,ncf=p.bottes.filter(b=>b.cf).length;
     const r={km:p.km,bottes:nb*100,cf:ncf*300,all4:nb===4?300:0,trip:0,delayed:0,safe:0,shutout:0};
-    if(p.km===1000){
+    if(p.km===DIST(s)){
       r.trip=400;if(s.delayed)r.delayed=300;if(p.n200===0)r.safe=300;
       if(s.seats.every((q,k)=>k===j||q.km===0))r.shutout=500;
     }
@@ -432,15 +436,15 @@ function endRound(s,wi){
 }
 function newRound(s){
   s.round++;s.deck=buildDeck();s.discard=[];s.used=[];s.reshuf=0;s.delayed=false;s.roundRes=null;s.roundWinner=-1;
-  s.seats.forEach(p=>Object.assign(p,{hand:[],battle:null,limit:false,km:0,n200:0,bottes:[]}));
+  s.seats.forEach(p=>Object.assign(p,{hand:[],battle:s.fast?'GO':null,limit:false,km:0,n200:0,bottes:[]}));
   for(let r=0;r<6;r++)s.seats.forEach((p,j)=>draw(s,j));
   s.phase='play';
-  log(s,`🚦 Manche ${s.round} : tout le monde attend son feu vert !`,'big');
+  log(s,s.fast?`🟢 Manche ${s.round} : tout le monde démarre au feu vert !`:`🚦 Manche ${s.round} : tout le monde attend son feu vert !`,'big');
   s.fx.push({e:'round'});
   advanceTurn(s,(s.round-1)%s.seats.length);
 }
 function newGame(seats,o){
-  const s={v:0,h:'',phase:'play',mode:o.mode,room:o.room||null,gameId:o.gameId,target:o.target||0,round:0,
+  const s={v:0,h:'',phase:'play',mode:o.mode,fast:!!o.fast,dist:o.dist||1000,room:o.room||null,gameId:o.gameId,target:o.target||0,round:0,
     seats:seats.map((x,j)=>({id:x.id,name:x.name,bot:!!x.bot,car:CARS[j%4],total:0,hand:[],battle:null,limit:false,km:0,n200:0,bottes:[]})),
     deck:[],discard:[],turn:0,log:[],fx:[],winners:[]};
   newRound(s);return s;
@@ -451,7 +455,7 @@ function botteHelps(p,b){const q=clone(p);q.bottes.push({c:b});applyBotte({},q,b
 function keepValue(s,i,c,H){
   const p=s.seats[i],d=DEF[c];
   if(d.k==='bot')return 1000;
-  if(d.k==='km'){if(p.km+d.v>1000)return 0;if(d.v===200&&p.n200>=2)return 0;if(limited(p)&&d.v>50)return 30+d.v/10;return 40+d.v/5}
+  if(d.k==='km'){if(p.km+d.v>DIST(s))return 0;if(d.v===200&&p.n200>=2)return 0;if(limited(p)&&d.v>50)return 30+d.v/10;return 40+d.v/5}
   if(d.k==='par'){
     const prot=c==='FV'||c==='FL'?'BP':DEF[d.vs].bot;
     if(hasB(p,prot))return 1;
@@ -470,13 +474,13 @@ function botChoose(s,i){
   let best=null;
   const lead=Math.max(...s.seats.map((q,j)=>j===i?-1:q.km));
   H.forEach((c,k)=>{if(DEF[c].k!=='atk')return;targets(s,i,c).forEach(t=>{
-    const T=s.seats[t];let sc=T.km+T.total/20+(c==='LV'?(T.km>=850?-400:-120):0)+(T.km>=700?250:0)+(T.km<lead?-200:0)+(T.km<p.km-200?-300:0)+Math.random()*30;
+    const T=s.seats[t],K=1000/DIST(s),tk=T.km*K;let sc=tk+T.total/20+(c==='LV'?(tk>=850?-400:-120):0)+(tk>=700?250:0)+(T.km<lead?-200:0)+(tk<p.km*K-200?-300:0)+Math.random()*30;
     if(!best||sc>best.sc)best={sc,k,t};
   })});
   if(best&&best.sc>=520)return {type:'play',idx:best.k,target:best.t};
   const kms=H.map((c,k)=>({c,k})).filter(o=>DEF[o.c].k==='km'&&canSelf(s,i,o.c));
   if(kms.length){
-    const ex=kms.find(o=>p.km+DEF[o.c].v===1000);if(ex)return P(ex.k);
+    const ex=kms.find(o=>p.km+DEF[o.c].v===DIST(s));if(ex)return P(ex.k);
     kms.sort((a,b)=>DEF[b.c].v-DEF[a.c].v);return P(kms[0].k);
   }
   if(best&&best.sc>=250)return {type:'play',idx:best.k,target:best.t};
@@ -533,8 +537,10 @@ const SFX={
 
 /* ============ EFFETS VISUELS ============ */
 const FX={cv:null,cx:null,parts:[],run:false,dpr:1};
-function fxInit(){FX.cv=$('#fxc');FX.cx=FX.cv.getContext('2d');const rs=()=>{FX.dpr=Math.min(2,window.devicePixelRatio||1);FX.cv.width=innerWidth*FX.dpr;FX.cv.height=innerHeight*FX.dpr;FX.cv.style.width=innerWidth+'px';FX.cv.style.height=innerHeight+'px'};rs();addEventListener('resize',rs)}
-function addP(p){if(FX.parts.length>900)return;FX.parts.push(p);if(!FX.run){FX.run=true;requestAnimationFrame(fxLoop)}}
+function fxInit(){FX.cv=$('#fxc');FX.cx=FX.cv.getContext('2d');const rs=()=>{FX.dpr=Math.min(1.5,window.devicePixelRatio||1);FX.cv.width=innerWidth*FX.dpr;FX.cv.height=innerHeight*FX.dpr;FX.cv.style.width=innerWidth+'px';FX.cv.style.height=innerHeight+'px'};rs();addEventListener('resize',rs)}
+const SPR={};
+function sprite(t){if(SPR[t])return SPR[t];const c=document.createElement('canvas');c.width=c.height=72;const x=c.getContext('2d');x.font='56px serif';x.textAlign='center';x.textBaseline='middle';x.fillText(t,36,40);return SPR[t]=c}
+function addP(p){if(FX.parts.length>350)return;FX.parts.push(p);if(!FX.run){FX.run=true;requestAnimationFrame(fxLoop)}}
 function fxLoop(){
   const c=FX.cx,d=FX.dpr;c.setTransform(d,0,0,d,0,0);c.clearRect(0,0,innerWidth,innerHeight);
   FX.parts=FX.parts.filter(p=>{
@@ -542,7 +548,7 @@ function fxLoop(){
     if(p.life<=0||p.s<=0)return false;
     const a=Math.min(1,p.life/p.fade);c.globalAlpha=a*(p.a||1);c.save();c.translate(p.x,p.y);c.rotate(p.r);
     if(p.sh==='rect'){c.fillStyle=p.c;c.fillRect(-p.s/2,-p.s/4,p.s,p.s/2)}
-    else if(p.sh==='txt'){c.font=`${p.s}px serif`;c.textAlign='center';c.textBaseline='middle';c.fillText(p.t,0,0)}
+    else if(p.sh==='txt'){c.drawImage(sprite(p.t),-p.s/2,-p.s/2,p.s,p.s)}
     else{c.fillStyle=p.c;c.beginPath();c.arc(0,0,p.s,0,7);c.fill()}
     c.restore();return true;
   });
@@ -588,7 +594,7 @@ const ON={salle:null,code:null,players:[]};
 const AVS={};             // avatars par id
 const PREVKM={};
 let prevHandLen=0,lastEndKey=null,overFxKey=null;
-const HOME={bots:LS.get('mb_bots',2),target:LS.get('mb_target',0)};
+const HOME={bots:LS.get('mb_bots',2),target:LS.get('mb_target',0),dist:LS.get('mb_dist',700),fast:LS.get('mb_fast',true)};
 
 const CG=()=>window.ChadGang||null;
 const myIdx=()=>S&&S.seats?S.seats.findIndex(p=>p.id===MYID):-1;
@@ -635,7 +641,7 @@ function avHTML(p,j){
   if(a)return `<img class="av" data-chadgang-id="${esc(p.id)}" src="${esc(a)}" alt="">`;
   return `<div class="av" data-chadgang-id="${esc(p.id)}" style="background:${COLORS[j%8]}">${esc((p.name||'?').trim().charAt(0).toUpperCase())}</div>`;
 }
-const pct=km=>Math.min(1000,km)/1000*90+2;
+const pct=km=>Math.min(DIST(S),km)/DIST(S)*90+2;
 function roadHTML(p,j,extra=''){
   const prev=PREVKM[p.id]==null?p.km:PREVKM[p.id];
   return `<div class="road">${trackHTML(p,j,prev)}${extra}</div>`;
@@ -666,7 +672,7 @@ function pilesHTML(s,p){
   const top=s.discard[s.discard.length-1];
   let h='';
   if(p){
-    h+=`<div class="pile"><label>Bataille</label>${p.battle?cardHTML(p.battle,'sm'):`<div class="slot">${hasB(p,'BP')?'🚑':'🚦'}</div>`}</div>`;
+    h+=`<div class="pile"><label>Bataille</label>${real(p.battle)?cardHTML(p.battle,'sm'):`<div class="slot">${hasB(p,'BP')?'🚑':p.battle==='GO'?'🟢':'🚦'}</div>`}</div>`;
     h+=`<div class="pile"><label>Vitesse</label>${limited(p)?cardHTML('LV','sm'):`<div class="slot">∞</div>`}</div>`;
     h+=`<div class="pile"><label>Bottes</label><div class="bslots">${['BP','BC','BI','BA'].map(b=>{const g=p.bottes.find(x=>x.c===b);return `<div class="bslot ${g?'got':''} ${g&&g.cf?'cf':''}" title="${esc(DEF[b].n)}">${DEF[b].ic}</div>`}).join('')}</div></div>`;
   }
@@ -677,7 +683,7 @@ function pilesHTML(s,p){
 function meHTML(s,j){
   const p=s.seats[j],turn=s.phase==='play'&&s.turn===j;
   return `<div class="me ${turn?'turn':''}" data-seat="${j}">
-    <div class="mhead">${avHTML(p,j)}<div class="nm"><b>${esc(p.name)}</b><small>${p.total} pts au total${p.n200?` · 🦅 ${p.n200}/2`:''}</small></div><div class="bigkm">${p.km}<small> / 1000 km</small></div></div>
+    <div class="mhead">${avHTML(p,j)}<div class="nm"><b>${esc(p.name)}</b><small>${p.total} pts au total${p.n200?` · 🦅 ${p.n200}/2`:''}</small></div><div class="bigkm">${p.km}<small> / ${DIST(s)} km</small></div></div>
     ${roadHTML(p,j)}
     <div class="ost">${stHTML(p)}</div>
     <div class="piles">${pilesHTML(s,p)}</div>
@@ -724,7 +730,7 @@ function handHTML(s,mi){
 function renderGame(){
   const s=S;if(!s||!s.seats)return;
   const mi=myIdx(),n=s.seats.length;
-  $('#ginfo').innerHTML=`<span class="pill">Manche ${s.round}</span><span class="pill">${s.target?'🎯 '+s.target+' pts':'⚡ 1 manche'}</span>${MODE==='online'?`<span class="pill">Salle ${esc(ON.code)}</span>`:''}`;
+  $('#ginfo').innerHTML=`<span class="pill">Manche ${s.round}</span><span class="pill">🏁 ${DIST(s)} km${s.fast?' ⚡':''}</span><span class="pill">${s.target?'🎯 '+s.target+' pts':'1 manche'}</span>${MODE==='online'?`<span class="pill">Salle ${esc(ON.code)}</span>`:''}`;
   const order=[];if(mi>=0)for(let k=1;k<n;k++)order.push((mi+k)%n);else for(let k=0;k<n;k++)order.push(k);
   const selC=(mi>=0&&SEL!=null)?s.seats[mi].hand[SEL]:null;
   const tg=(selC&&s.turn===mi&&s.phase==='play')?targets(s,mi,selC):[];
@@ -762,7 +768,7 @@ function renderEnd(){
     const names=win.map(j=>esc(s.seats[j].name)).join(' & ');
     head=`<div class="trophy">🏆</div><h2 style="text-align:center">${names} ${win.length>1?'gagnent':'gagne'} la partie !</h2>`;
   }else{
-    head=`<h2>🏁 Fin de la manche ${s.round}</h2><p class="muted">${s.roundWinner>=0?`${esc(s.seats[s.roundWinner].name)} a bouclé les 1000 bornes !`:'La pioche est vide, personne n’a fini.'} ${s.target?`Premier à ${s.target} pts.`:''}</p>`;
+    head=`<h2>🏁 Fin de la manche ${s.round}</h2><p class="muted">${s.roundWinner>=0?`${esc(s.seats[s.roundWinner].name)} a bouclé les ${DIST(s)} bornes !`:'La pioche est vide, personne n’a fini.'} ${s.target?`Premier à ${s.target} pts.`:''}</p>`;
   }
   let t=`<table class="stbl"><tr><th>Pilote</th><th>Km</th><th>Bonus</th><th>Manche</th><th>Total</th></tr>`;
   order.forEach(j=>{const p=s.seats[j],r=res[j]||{};const bon=(r.bottes||0)+(r.cf||0)+(r.trip||0)+(r.delayed||0)+(r.safe||0)+(r.shutout||0)+(r.all4||0);
@@ -780,7 +786,7 @@ function renderEnd(){
     overFxKey=s.gameId;const mi=myIdx();
     setTimeout(()=>{
       if(mi>=0&&win.includes(mi)){banner('VICTOIRE !','🏆 Champion de la route','',2600);fireworks(5000);confetti(220);SFX.fanfare();vibrate([100,60,100,60,300])}
-      else if(mi>=0){banner('PERDU…',`${esc(s.seats[win[0]].name)} gagne`,'white small',2200);SFX.lose();emojiRain('🐌',18)}
+      else if(mi>=0){banner('PERDU…',`${esc(s.seats[win[0]].name)} gagne`,'white small',2200);SFX.lose();emojiRain('🐌',10)}
       else {confetti(150);SFX.fanfare()}
     },fresh?1200:200);
   }
@@ -789,7 +795,7 @@ function renderEnd(){
 /* ============ EFFETS DE JEU ============ */
 function seatEl(j){return $(`[data-seat="${j}"]`)}
 function fromPt(j){return j===myIdx()?center($('#hand')):center(seatEl(j))}
-function runFx(list){list.forEach((f,k)=>setTimeout(()=>{try{fx1(f)}catch(e){console.warn(e)}},k*380))}
+function runFx(list){list.forEach((f,k)=>setTimeout(()=>{try{fx1(f)}catch(e){console.warn(e)}},k*300))}
 function fx1(f){
   const s=S,mi=myIdx();
   const nm=j=>s.seats[j]?esc(s.seats[j].name):'?';
@@ -802,7 +808,7 @@ function fx1(f){
       setTimeout(()=>{const pt=center($(`[data-car="${f.p}"]`));floatText(pt.x,pt.y-10,'+'+f.v+' km');smoke(pt.x-14,pt.y+4,8,'#cfd3ff')},520);
       if(f.v===200){speedLines();SFX.zoom();if(f.p===mi)shake($('#game'),5,500);banner('200 !',`🦅 ${nm(f.p)} met les gaz`,'',900)}
       else SFX.vroom();
-      if(f.from<750&&f.km>=750&&f.km<1000)setTimeout(()=>{banner('SPRINT FINAL',`🏁 ${nm(f.p)} est à ${f.km} km !`,'red small',1500);SFX.honk()},900);
+      if(f.from<DIST(s)*.75&&f.km>=DIST(s)*.75&&f.km<DIST(s))setTimeout(()=>{banner('SPRINT FINAL',`🏁 ${nm(f.p)} est à ${f.km} km !`,'red small',1500);SFX.honk()},900);
       break;
     }
     case 'atk':{
@@ -840,7 +846,7 @@ function fx1(f){
     }
     case 'win1000':{
       setTimeout(()=>{const pt=center($(`[data-car="${f.p}"]`));confetti(220);fireworks(3000);burst(pt.x,pt.y,{n:80,cols:['#ffd426','#fff','#1fbf5b'],sp:10});
-        banner('1000 BORNES !',`🏁 ${nm(f.p)} passe la ligne d’arrivée !`,'',2200);SFX.fanfare();if(f.p===mi)vibrate([100,50,100,50,400])},500);
+        banner(`${DIST(s)} BORNES !`,`🏁 ${nm(f.p)} passe la ligne d’arrivée !`,'',2200);SFX.fanfare();if(f.p===mi)vibrate([100,50,100,50,400])},500);
       break;
     }
   }
@@ -851,8 +857,8 @@ let botT=null,botKey=null;
 function scheduleBots(){
   if(!S||S.phase!=='play'||!S.seats)return;
   const p=S.seats[S.turn];let delay=null;
-  if(MODE==='solo'){if(p.bot)delay=1000+Math.random()*700}
-  else if(amHost()){if(p.bot)delay=1150+Math.random()*700;else if(!present(p.id))delay=12000}
+  if(MODE==='solo'){if(p.bot)delay=650+Math.random()*350}
+  else if(amHost()){if(p.bot)delay=750+Math.random()*350;else if(!present(p.id))delay=12000}
   if(delay==null)return;
   const key=S.v+':'+S.h;if(botKey===key)return;botKey=key;clearTimeout(botT);
   botT=setTimeout(()=>{
@@ -899,7 +905,7 @@ function joinRoom(code,create){
     MYID=info.me;ON.players=info.players||[];sendAv();
     const last=info.last;
     if(last&&last.t==='state'&&last.s&&newer(last.s))setState(last.s,false);
-    else if(!S)commit({phase:'lobby',target:HOME.target,bots:0,fx:[]});
+    else if(!S)commit({phase:'lobby',target:HOME.target,bots:0,dist:HOME.dist,fast:HOME.fast,fx:[]});
     route();
   });
   salle.on('players',list=>{if(ON.salle!==salle)return;ON.players=list||[];sendAv();route();scheduleBots()});
@@ -916,7 +922,8 @@ function showReact(id,e){
   if(!REACTS.includes(e))return;
   let el=null,name='';if(S&&S.seats){const j=S.seats.findIndex(p=>p.id===id);if(j>=0){el=j===myIdx()?$('#hand'):seatEl(j);name=S.seats[j].name}}
   // petite pluie légère sur tout l'écran
-  for(let i=0;i<12;i++)addP({x:Math.random()*innerWidth,y:-30-Math.random()*innerHeight*.5,vx:(Math.random()-.5)*1.2,vy:2+Math.random()*2,g:.04,dr:.995,r:(Math.random()-.5)*.4,vr:(Math.random()-.5)*.04,life:230,fade:50,s:26+rnd(14),sh:'txt',t:e});
+  const now=Date.now();if(now-(showReact.last||0)<700)return;showReact.last=now;
+  for(let i=0;i<8;i++)addP({x:Math.random()*innerWidth,y:-30-Math.random()*innerHeight*.5,vx:(Math.random()-.5)*1.2,vy:2+Math.random()*2,g:.04,dr:.995,r:(Math.random()-.5)*.4,vr:(Math.random()-.5)*.04,life:230,fade:50,s:26+rnd(14),sh:'txt',t:e});
   // l'emoji au-dessus du joueur qui l'envoie
   const o=center(el),d=document.createElement('div');d.className='react';d.textContent=e;d.style.left=o.x+'px';d.style.top=o.y+'px';document.body.appendChild(d);
   d.animate([{transform:'translate(-50%,-50%) scale(.3)',opacity:0},{transform:'translate(-50%,-80%) scale(1.3)',opacity:1,offset:.2},{transform:'translate(-50%,-220%) scale(1)',opacity:0}],{duration:1500,easing:'ease-out'}).onfinish=()=>d.remove();
@@ -939,10 +946,13 @@ function renderLobby(){
     <p class="muted" style="font-size:13px;margin-top:6px">Invite tes potes avec <b>Inviter</b> ou <b>📣 Annoncer ma partie</b> dans la barre du hub.</p></div>
     <h3>🏎️ Pilotes (${tot}/4)</h3><div class="plist">${list}</div>
     ${spect.length?`<p class="muted" style="margin-top:6px;font-size:13px">👀 Spectateurs : ${spect.map(p=>esc(p.name)).join(', ')}</p>`:''}
-    ${host?`<h3>🎯 Objectif</h3><div class="chips">${[[0,'⚡ 1 manche'],[2000,'2000 pts'],[5000,'5000 pts (classique)']].map(([v,l])=>`<button class="chip ${S.target===v?'on':''}" data-act="lb-target" data-v="${v}">${l}</button>`).join('')}</div>
+    ${host?`<h3>🏁 Distance</h3><div class="chips">${[500,700,1000].map(v=>`<button class="chip ${(S.dist||1000)===v?'on':''}" data-act="lb-dist" data-v="${v}">${v} km</button>`).join('')}</div>
+    <h3>⚡ Mode rapide</h3><div class="chips"><button class="chip ${S.fast?'on':''}" data-act="lb-fast" data-v="1">Oui</button><button class="chip ${!S.fast?'on':''}" data-act="lb-fast" data-v="0">Non (classique)</button></div>
+    <p class="muted" style="font-size:12px;margin-top:4px">Rapide : tout le monde démarre au feu vert, et on repart direct après une réparation.</p>
+    <h3>🎯 Objectif</h3><div class="chips">${[[0,'⚡ 1 manche'],[2000,'2000 pts'],[5000,'5000 pts (classique)']].map(([v,l])=>`<button class="chip ${S.target===v?'on':''}" data-act="lb-target" data-v="${v}">${l}</button>`).join('')}</div>
     <h3>🤖 Bots</h3><div class="row"><button class="btn w sm" data-act="lb-bots" data-d="-1" ${nb<=0?'disabled':''}>−</button><b style="min-width:30px;text-align:center;font-size:20px">${nb}</b><button class="btn w sm" data-act="lb-bots" data-d="1" ${nb>=maxB?'disabled':''}>+</button></div>
     <div style="margin-top:16px"><button class="btn g" style="width:100%;font-size:20px" data-act="start" ${tot<2?'disabled':''}>🚦 LANCER LA COURSE</button>${tot<2?'<p class="muted" style="text-align:center;margin-top:6px;font-size:13px">Il faut au moins 2 pilotes (ajoute un bot !)</p>':''}</div>`
-    :`<p class="note" style="margin-top:12px">⏳ En attente de l’hôte… Objectif : <b>${S.target?S.target+' pts':'1 manche'}</b></p>`}
+    :`<p class="note" style="margin-top:12px">⏳ En attente de l’hôte… Course de <b>${S.dist||1000} km</b>${S.fast?' (rapide)':''}, objectif : <b>${S.target?S.target+' pts':'1 manche'}</b></p>`}
     <div style="margin-top:12px;text-align:center"><button class="btn w sm" data-act="home">🚪 Quitter la salle</button></div>
   </div>`;
 }
@@ -953,7 +963,7 @@ function startOnline(keepBots){
   const seats=humans.concat(Array.from({length:nb},(_,k)=>({id:'bot'+k,name:BOTNAMES[k],bot:1})));
   if(seats.length<2){toast('Il faut au moins 2 pilotes !');return}
   const target=S.target||0;
-  const ns=newGame(seats,{mode:'online',room:ON.code,target,gameId:ON.code+'-'+Date.now().toString(36)});
+  const ns=newGame(seats,{mode:'online',room:ON.code,target,dist:S.dist||1000,fast:!!S.fast,gameId:ON.code+'-'+Date.now().toString(36)});
   ns.bots=nb;commit(ns);
 }
 
@@ -965,7 +975,7 @@ function startSolo(){
   const names=BOTNAMES.slice().sort(()=>Math.random()-.5);
   const seats=[{id:MYID,name}].concat(Array.from({length:HOME.bots},(_,k)=>({id:'bot'+k,name:names[k],bot:1})));
   S=null;lastEndKey=null;
-  commit(newGame(seats,{mode:'solo',target:HOME.target,gameId:'solo-'+Date.now().toString(36)}));
+  commit(newGame(seats,{mode:'solo',target:HOME.target,dist:HOME.dist,fast:HOME.fast,gameId:'solo-'+Date.now().toString(36)}));
 }
 function resumeSolo(){const s=LS.get('mb_solo',null);if(!s)return;leaveRoom();MODE='solo';MYID=s.seats[0].id;S=null;lastEndKey=null;s.seats.forEach(p=>PREVKM[p.id]=p.km);setState(s,false)}
 
@@ -985,6 +995,8 @@ function renderHome(){
       :`<p class="note">Le mode en ligne marche quand le jeu est ouvert depuis le hub <b>ChadGangGames</b>. En attendant, entraîne-toi contre l’ordi 👇</p>`}
     <h3>🤖 Solo contre l’ordi</h3>
     <div class="row"><small style="width:70px">Bots</small><div class="chips">${[1,2,3].map(n=>`<button class="chip ${HOME.bots===n?'on':''}" data-act="h-bots" data-v="${n}">${n}</button>`).join('')}</div></div>
+    <div class="row" style="margin-top:8px"><small style="width:70px">Distance</small><div class="chips">${[500,700,1000].map(v=>`<button class="chip ${HOME.dist===v?'on':''}" data-act="h-dist" data-v="${v}">${v} km</button>`).join('')}</div></div>
+    <div class="row" style="margin-top:8px"><small style="width:70px">Rapide</small><div class="chips"><button class="chip ${HOME.fast?'on':''}" data-act="h-fast" data-v="1">⚡ Oui</button><button class="chip ${!HOME.fast?'on':''}" data-act="h-fast" data-v="0">Non</button></div></div>
     <div class="row" style="margin-top:8px"><small style="width:70px">Objectif</small><div class="chips">${[[0,'1 manche'],[2000,'2000'],[5000,'5000']].map(([v,l])=>`<button class="chip ${HOME.target===v?'on':''}" data-act="h-target" data-v="${v}">${l}</button>`).join('')}</div></div>
     <div class="row" style="margin-top:12px"><button class="btn" data-act="solo">🏁 Lancer en solo</button>${canResume?`<button class="btn w" data-act="resume">↩ Reprendre</button>`:''}</div>
   </div>
@@ -996,11 +1008,12 @@ function mini(c){return cardHTML(c,'sm').replace('class="card','style="--cw:40px
 function rl(cards,txt){return `<div class="rl"><div class="rlc">${cards.map(mini).join('')}</div><div>${txt}</div></div>`}
 function showRules(){
   $('#rulem').innerHTML=`<div class="mbox panel rules" data-act="noop"><h2>📖 Les règles</h2>
-  <p><b>But :</b> être le premier à parcourir <b>exactement 1000 km</b>. À chaque tour, tu <b>pioches</b> (c’est automatique) puis tu <b>joues</b> ou <b>défausses</b> une carte.</p>
+  <p><b>But :</b> être le premier à parcourir <b>exactement</b> la distance de la course (<b>500, 700 ou 1000 km</b>, au choix). À chaque tour, tu <b>pioches</b> (c’est automatique) puis tu <b>joues</b> ou <b>défausses</b> une carte.</p>
   <h3>🚦 Rouler</h3>
   ${rl(['FV'],'<b>Feu vert</b> : obligatoire pour démarrer, et pour repartir après un feu rouge ou une réparation.')}
-  ${rl(['25','100','200'],'<b>Bornes</b> : 25, 50, 75, 100 ou 200 km. Deux cartes 200 maximum par manche, et on ne dépasse jamais 1000.')}
-  <p>🔄 <b>Pioche vide ?</b> La défausse et les bornes déjà posées sont remélangées automatiquement (tes km restent acquis) : la manche ne s’arrête que quand quelqu’un atteint les <b>1000 km</b>.</p>
+  ${rl(['25','100','200'],'<b>Bornes</b> : 25, 50, 75, 100 ou 200 km. Deux cartes 200 maximum par manche, et on ne dépasse jamais la distance de la course.')}
+  <p>⚡ <b>Mode rapide</b> (activé par défaut) : tout le monde démarre au feu vert, et après une réparation (essence, roue, réparations) on repart directement, sans feu vert. Le feu vert ne sert plus qu’après un feu rouge.</p>
+  <p>🔄 <b>Pioche vide ?</b> La défausse et les bornes déjà posées sont remélangées automatiquement (tes km restent acquis) : la manche ne s’arrête que quand quelqu’un atteint la <b>ligne d’arrivée</b>.</p>
   <h3>💥 Attaques</h3>
   ${rl(['FR','PE','CR','AC'],'<b>Feu rouge, panne d’essence, crevaison, accident</b> : à poser sur un adversaire qui roule pour le bloquer.')}
   ${rl(['LV'],'<b>Limitation de vitesse</b> : l’adversaire ne peut plus poser que des 25 ou 50 km.')}
@@ -1014,7 +1027,7 @@ function showRules(){
   ${rl(['BI'],'<b>Increvable</b> : immunisé contre les <b>crevaisons</b>.')}
   ${rl(['BA'],'<b>As du volant</b> : immunisé contre les <b>accidents</b>.')}
   <p>⚡ <b>Coup fourré</b> : si on t’attaque et que tu as en main la botte qui contre cette attaque, elle se déclenche <b>automatiquement</b> : l’attaque est annulée, tu gagnes +400 pts (100 + 300) et c’est à toi de jouer !</p>
-  <h3>🏆 Points de la manche</h3><ul><li>1 point par km parcouru</li><li>Botte +100 · Coup fourré +300 · Les 4 bottes +300</li><li>Voyage terminé (1000 km) +400</li><li>Sans carte 200 +300</li><li>Capot (tous les adversaires à 0 km) +500</li></ul>
+  <h3>🏆 Points de la manche</h3><ul><li>1 point par km parcouru</li><li>Botte +100 · Coup fourré +300 · Les 4 bottes +300</li><li>Voyage terminé (ligne d’arrivée) +400</li><li>Sans carte 200 +300</li><li>Capot (tous les adversaires à 0 km) +500</li></ul>
   <div style="text-align:center;margin-top:10px"><button class="btn" data-act="closerules">C’est parti !</button></div></div>`;
   $('#rulem').classList.add('on');
 }
@@ -1045,15 +1058,19 @@ document.addEventListener('click',e=>{
     case 'h-target':HOME.target=+el.dataset.v;LS.set('mb_target',HOME.target);renderHome();break;
     case 'solo':startSolo();break;
     case 'resume':resumeSolo();break;
+    case 'lb-dist':if(amHost()){const ns=clone(S);ns.fx=[];ns.dist=+el.dataset.v;commit(ns)}break;
+    case 'lb-fast':if(amHost()){const ns=clone(S);ns.fx=[];ns.fast=el.dataset.v==='1';commit(ns)}break;
+    case 'h-dist':HOME.dist=+el.dataset.v;LS.set('mb_dist',HOME.dist);renderHome();break;
+    case 'h-fast':HOME.fast=el.dataset.v==='1';LS.set('mb_fast',HOME.fast);renderHome();break;
     case 'lb-target':if(amHost()){const ns=clone(S);ns.fx=[];ns.target=+el.dataset.v;commit(ns)}break;
     case 'lb-bots':if(amHost()){const ns=clone(S);ns.fx=[];const maxB=Math.max(0,4-Math.min(4,ON.players.length));ns.bots=Math.max(0,Math.min(maxB,Math.min(ns.bots||0,maxB)+(+el.dataset.d)));commit(ns)}break;
     case 'start':if(amHost())startOnline();break;
     case 'next':if(amHost()&&S.phase==='roundEnd'){const ns=clone(S);ns.fx=[];newRound(ns);lastEndKey=null;commit(ns)}break;
     case 'rematch':if(!amHost())break;lastEndKey=null;
-      if(MODE==='solo'){const ns=newGame(S.seats.map(p=>({id:p.id,name:p.name,bot:p.bot})),{mode:'solo',target:S.target,gameId:'solo-'+Date.now().toString(36)});commit(ns)}
+      if(MODE==='solo'){const ns=newGame(S.seats.map(p=>({id:p.id,name:p.name,bot:p.bot})),{mode:'solo',target:S.target,dist:S.dist,fast:S.fast,gameId:'solo-'+Date.now().toString(36)});commit(ns)}
       else{const tgt=S.target,nb=S.seats.filter(p=>p.bot).length;S.target=tgt;startOnline(nb)}
       break;
-    case 'tolobby':if(amHost()){commit({phase:'lobby',target:S.target||0,bots:S.seats?S.seats.filter(p=>p.bot).length:0,fx:[]})}break;
+    case 'tolobby':if(amHost()){commit({phase:'lobby',target:S.target||0,dist:S.dist||1000,fast:!!S.fast,bots:S.seats?S.seats.filter(p=>p.bot).length:0,fx:[]})}break;
   }
 });
 let quitArm=0;
